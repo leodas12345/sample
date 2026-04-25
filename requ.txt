@@ -1,0 +1,386 @@
+EXP1 ----------------------------------------------------
+# Initialise a local repository
+git init myproject
+cd myproject
+
+# Create a file and make the first commit
+echo "# My DevOps Project" > README.md
+git add README.md
+git commit -m "Initial commit: add README"
+
+git checkout -b feature/hello
+
+echo "Hello from feature branch" > hello.txt
+git add hello.txt
+git commit -m "feat: add hello.txt"
+
+# Connect to remote (first time only)
+git remote add origin https://github.com/<username>/myproject.git
+git push -u origin feature/hello
+
+git checkout main
+git merge feature/hello
+git push origin main
+git log --oneline --graph
+
+
+
+EXP2 -----------------------------------------------------
+app.py--------
+from flask import Flask
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Hello from Dockerised Flask!"
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+
+
+
+requirements.txt---------
+flask
+
+
+Dockerfile-------
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY . .
+EXPOSE 5000
+CMD ["python", "app.py"]
+
+
+Build and run------
+# Build
+docker build -t <dockerhub-username>/flask-app:latest .
+
+# Test locally → visit http://localhost:5000
+docker run -d -p 5000:5000 <dockerhub-username>/flask-app:latest
+
+# Login and push
+docker login
+docker push <dockerhub-username>/flask-app:latest
+
+EXP3 ----------------------------------------------------------------
+app.py---------
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+students = {}
+next_id = 1
+
+@app.route('/students', methods=['GET'])
+def get_students():
+    return jsonify(list(students.values()))
+
+@app.route('/students', methods=['POST'])
+def add_student():
+    global next_id
+    data = request.get_json()
+    student = {'id': next_id, 'name': data['name'], 'roll': data['roll']}
+    students[next_id] = student
+    next_id += 1
+    return jsonify(student), 201
+
+@app.route('/students/<int:sid>', methods=['DELETE'])
+def delete_student(sid):
+    students.pop(sid, None)
+    return jsonify({'msg': 'Deleted'})
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+Run and test------------
+pip install flask
+python app.py
+
+# Add a student
+curl -X POST http://localhost:5000/students \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Alice","roll":"CS001"}'
+
+# List all students
+curl http://localhost:5000/students
+
+
+
+EXP4 ------------------------------------------------------------------
+.github/workflows/docker-publish.yml----------
+
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build Docker image
+        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/python-app:latest .
+
+      - name: Push to Docker Hub
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/python-app:latest
+
+
+
+EXP5 ---------------------------------------------------------------------------
+
+start and run -------------
+# Create a persistent volume for Jenkins data
+docker volume create jenkins-data
+
+# Run Jenkins (mounts Docker socket so it can build images)
+docker run -d \
+  --name jenkins \
+  -p 8080:8080 -p 50000:50000 \
+  -v jenkins-data:/var/jenkins_home \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  jenkins/jenkins:lts
+
+# Get the initial admin password
+docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+
+install docker --------------
+docker exec -u root jenkins bash -c \
+  "apt-get update && apt-get install -y docker.io"
+
+Jenkinsfile---------------------
+pipeline {
+    agent any
+    environment {
+        IMAGE_NAME      = "myapp"
+        DOCKER_HUB_USER = "<your-dockerhub-username>"
+    }
+    stages {
+        stage('Clone') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/<username>/<repo>.git'
+            }
+        }
+        stage('Build Image') {
+            steps {
+                sh 'docker build -t $DOCKER_HUB_USER/$IMAGE_NAME:latest .'
+            }
+        }
+        stage('Push to Hub') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh '''
+                      echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                      docker push $DOCKER_HUB_USER/$IMAGE_NAME:latest
+                    '''
+                }
+            }
+        }
+        stage('Deploy') {
+            steps {
+                sh 'docker run -d -p 5000:5000 $DOCKER_HUB_USER/$IMAGE_NAME:latest'
+            }
+        }
+    }
+}
+
+
+EXP6-------------------------------------------------------------------------
+kubectl create deployment myapp --image=nginx:latest
+kubectl get deployments
+kubectl get pods
+
+scale deployment---------
+# Scale up to 3 replicas
+kubectl scale deployment myapp --replicas=3
+kubectl get pods
+
+# Scale back down
+kubectl scale deployment myapp --replicas=1
+
+Expose, inspect & clean up-------------
+kubectl expose deployment myapp --port=80 --type=NodePort
+kubectl get services
+kubectl describe pod <pod-name>
+kubectl logs <pod-name>
+
+# Clean up
+kubectl delete deployment myapp
+kubectl delete service myapp
+
+deployment.yaml----------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: myapp
+  template:
+    metadata:
+      labels:
+        app: myapp
+    spec:
+      containers:
+      - name: myapp
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+
+
+
+kubectl apply -f deployment.yaml
+kubectl get all
+
+
+
+EXP7--------------------------------------------------------------------
+.github/workflows/build-push.yml--------------
+name: Docker Build & Push
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/python-app:latest
+
+
+
+EXP8-------------------------------------------------------------
+APP.PY------------
+from flask import Flask
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return "<h1>Flask app running in Docker!</h1>"
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+
+Dockerfile-----------------
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 5000
+CMD ["python", "app.py"]
+
+
+Build and run ----------------
+docker build -t flask-container .
+docker run -d -p 5000:5000 --name myflask flask-container
+docker ps
+# Visit http://localhost:5000
+
+
+
+EXP9--------------------------------------------------------------------
+git clone https://github.com/<username>/<repo-name>.git
+cd <repo-name>
+
+echo "Updated content" >> README.md
+cat README.md
+git diff
+
+
+git add README.md
+git commit -m "docs: update README with new content"
+git push origin main
+git log --oneline -3
+
+EXP10------------------------------------------------------------------------
+app.py----------------
+def add(a, b):
+    return a + b
+
+def greet(name):
+    return f"Hello, {name}!"
+
+
+
+test_app.py----------------------
+from app import add, greet
+
+def test_add():
+    assert add(2, 3) == 5
+
+def test_greet():
+    assert greet("World") == "Hello, World!"
+
+
+requirements.txt-----------------------------
+pytest
+
+
+
+
+.github/workflows/python-test.yml---------------
+name: Python Build & Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest test_app.py -v
+
+
+
